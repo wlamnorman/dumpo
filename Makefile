@@ -6,7 +6,7 @@ check:
 	cargo test --all
 
 run:
-	cargo run -- pack . --debug
+	cargo run -- pack .
 
 install:
 	cargo install --path .
