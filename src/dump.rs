@@ -82,6 +82,15 @@ fn looks_binary(bytes: &[u8]) -> bool {
     bytes.contains(&0)
 }
 
+fn clamp_to_utf8_boundary(bytes: &[u8], mut end: usize) -> usize {
+    end = end.min(bytes.len());
+    // UTF-8 codepoints are max 4 bytes
+    while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
+        end -= 1;
+    }
+    end
+}
+
 #[derive(Debug, Clone, Copy)]
 enum PrintError {
     TotalLimitReached,
@@ -131,6 +140,7 @@ fn print_file(
         }
     }
 
+    let cap = clamp_to_utf8_boundary(bytes, cap);
     let text = String::from_utf8_lossy(&bytes[..cap]);
     out.push_str(&text)?;
 
