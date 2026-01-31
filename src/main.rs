@@ -46,6 +46,9 @@ pub(crate) struct PackArgs {
     #[arg(long, action = clap::ArgAction::Append)]
     pub(crate) exclude: Vec<String>,
 
+    #[arg(long, default_value_t = false)]
+    pub(crate) verbose: bool,
+
     // Optional explicit config path; if not set, search ancestors.
     #[arg(long)]
     pub(crate) config: Option<PathBuf>,

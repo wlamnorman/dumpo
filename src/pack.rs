@@ -15,18 +15,7 @@ pub(crate) fn run_pack(args: PackArgs) -> Result<()> {
         .canonicalize()
         .with_context(|| format!("failed to canonicalize path: {}", args.path.display()))?;
 
-    // Load config (optional)
-    let cfg = if args.no_config {
-        DumpoConfig::default()
-    } else if let Some(path) = &args.config {
-        let s = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read config: {}", path.display()))?;
-        toml::from_str::<DumpoConfig>(&s)
-            .with_context(|| format!("failed to parse config: {}", path.display()))?
-    } else {
-        let (_path, cfg) = DumpoConfig::load_nearest(&root)?;
-        cfg
-    };
+    let (cfg_path, cfg) = load_config_for_pack(&root, &args)?;
 
     // Resolve effective settings
     let max_file_bytes = args
@@ -45,17 +34,37 @@ pub(crate) fn run_pack(args: PackArgs) -> Result<()> {
         .or(cfg.include_hidden)
         .unwrap_or(false);
 
-    let include = if !args.include.is_empty() {
-        args.include
+    let (include_from_cli, include) = if !args.include.is_empty() {
+        (true, args.include)
     } else {
-        cfg.include.unwrap_or_default()
+        (false, cfg.include.unwrap_or_default())
     };
 
-    let exclude = if !args.exclude.is_empty() {
-        args.exclude
+    let (exclude_from_cli, exclude) = if !args.exclude.is_empty() {
+        (true, args.exclude)
     } else {
-        cfg.exclude.unwrap_or_default()
+        (false, cfg.exclude.unwrap_or_default())
     };
+
+    if args.verbose {
+        let cfg_display = cfg_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<none>".to_string());
+
+        eprintln!(
+            "dumpo: root={} config={} max_file_bytes={} max_total_bytes={} include_hidden={} {} {} stdout={} clipboard={}",
+            root.display(),
+            cfg_display,
+            max_file_bytes,
+            max_total_bytes,
+            include_hidden,
+            summarize_patterns("include", include_from_cli, &include),
+            summarize_patterns("exclude", exclude_from_cli, &exclude),
+            args.stdout,
+            args.clipboard,
+        );
+    }
 
     let selector = Selector::new(&include, &exclude)?;
 
@@ -81,4 +90,98 @@ pub(crate) fn run_pack(args: PackArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+use std::path::{Path, PathBuf};
+
+fn load_config_for_pack(root: &Path, args: &PackArgs) -> Result<(Option<PathBuf>, DumpoConfig)> {
+    if args.no_config {
+        return Ok((None, DumpoConfig::default()));
+    }
+
+    if let Some(path) = &args.config {
+        let s = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config: {}", path.display()))?;
+        let cfg = toml::from_str::<DumpoConfig>(&s)
+            .with_context(|| format!("failed to parse config: {}", path.display()))?;
+        return Ok((Some(path.clone()), cfg));
+    }
+
+    DumpoConfig::load_nearest(root)
+}
+
+fn summarize_patterns(label: &str, from_cli: bool, patterns: &[String]) -> String {
+    if patterns.is_empty() {
+        return format!("{label}=<none>");
+    }
+
+    let n = patterns.len().min(20);
+    let head = patterns[..n].join(", ");
+    let src = if from_cli { "cli" } else { "config" };
+
+    if patterns.len() > n {
+        format!("{label}({src})=[{head}, ...] (n={})", patterns.len())
+    } else {
+        format!("{label}({src})=[{head}] (n={})", patterns.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::TempRepo;
+
+    fn base_args(repo: &TempRepo) -> PackArgs {
+        PackArgs {
+            path: repo.path().to_path_buf(),
+            max_file_bytes: None,
+            max_total_bytes: None,
+            include_hidden: None,
+            no_include_hidden: None,
+            verbose: false,
+            include: vec![],
+            exclude: vec![],
+            config: None,
+            no_config: false,
+            stdout: true,
+            clipboard: false,
+        }
+    }
+
+    #[test]
+    fn no_config_ignores_repo_dumpo_toml() {
+        let repo = TempRepo::new();
+        repo.write("dumpo.toml", "max_total_bytes = 111\n");
+
+        let args = PackArgs {
+            no_config: true,
+            ..base_args(&repo)
+        };
+
+        let root = args.path.canonicalize().unwrap();
+        let (_path, cfg) = load_config_for_pack(&root, &args).unwrap();
+
+        // default config struct when --no-config is set
+        assert!(cfg.max_total_bytes.is_none());
+        assert!(cfg.max_file_bytes.is_none());
+        assert!(cfg.include_hidden.is_none());
+        assert!(cfg.include.is_none());
+        assert!(cfg.exclude.is_none());
+    }
+
+    #[test]
+    fn explicit_config_overrides_nearest_search() {
+        let repo = TempRepo::new();
+        repo.write("dumpo.toml", "max_total_bytes = 111\n");
+        repo.write("custom.toml", "max_total_bytes = 222\n");
+
+        let mut args = base_args(&repo);
+        args.config = Some(repo.path().join("custom.toml"));
+
+        let root = args.path.canonicalize().unwrap();
+        let (path, cfg) = load_config_for_pack(&root, &args).unwrap();
+
+        assert!(path.unwrap().ends_with("custom.toml"));
+        assert_eq!(cfg.max_total_bytes, Some(222));
+    }
 }
