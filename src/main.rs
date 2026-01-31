@@ -32,8 +32,11 @@ pub(crate) struct PackArgs {
     #[arg(long, default_value_t = false)]
     pub(crate) include_hidden: bool,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = !cfg!(target_os = "macos"))]
     pub(crate) stdout: bool,
+
+    #[arg(long, default_value_t = cfg!(target_os = "macos"))]
+    pub(crate) clipboard: bool,
 }
 
 #[derive(Subcommand)]

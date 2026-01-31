@@ -18,7 +18,13 @@ pub(crate) fn run_pack(args: PackArgs) -> Result<()> {
         args.include_hidden,
     )?;
 
-    copy_to_clipboard(&bytes)?;
+    if !args.clipboard && !args.stdout {
+        anyhow::bail!("no output selected (use --stdout and/or --clipboard)");
+    }
+
+    if args.clipboard {
+        copy_to_clipboard(&bytes)?;
+    }
 
     if args.stdout {
         let mut out = io::stdout().lock();
