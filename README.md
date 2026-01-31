@@ -40,14 +40,16 @@ dumpo can load a dumpo.toml from the nearest ancestor directory of the repo root
 - Disable config loading entirely: `dumpo pack --no-config`
 
 
-### Example dumpo.toml:
+Example `dumpo.toml`:
 
+```toml
 max_file_bytes = 20000
 max_total_bytes = 400000
 include_hidden = false
 
-# Empty means "include all files" (subject to safety filters)
-include = []
+# Glob patterns matched against repo-relative paths using '/' separators.
+# Empty include = include everything (subject to built-in safety filters).
+include = ["src/**/*"]
 
-# Empty means "exclude nothing" (subject to safety filters)
+# Empty exclude = exclude nothing beyond the built-in filters.
 exclude = []
