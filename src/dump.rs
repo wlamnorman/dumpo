@@ -6,7 +6,9 @@ use walkdir::WalkDir;
 
 use crate::filter::{should_prune_walk_entry, should_skip_file};
 
+const CODEBLOCK_CLOSE: &str = "```\n\n";
 const TRUNCATION_FOOTER: &str = "\n... (truncated: max_total_bytes reached)\n";
+const FILE_TRUNCATED_MARKER: &str = "(file truncated)\n\n";
 
 pub(crate) fn build_dump_bytes(
     root: &Path,
@@ -118,8 +120,7 @@ fn print_file(
     out.try_write_line("")?;
     out.try_write_line(&format!("```{}", language_hint(path)))?;
 
-    let reserve_for_footer = "\n```\n\n".len();
-    let remaining_for_content = out.remaining().saturating_sub(reserve_for_footer);
+    let remaining_for_content = out.remaining().saturating_sub(CODEBLOCK_CLOSE.len());
     if remaining_for_content == 0 {
         return Err(PrintError::TotalLimitReached);
     }
@@ -134,12 +135,9 @@ fn print_file(
         out.try_write_line("")?;
     }
 
-    out.try_write_line("```")?;
-    out.try_write_line("")?;
-
+    out.try_write(CODEBLOCK_CLOSE)?;
     if bytes.len() > cap {
-        let _ = out.try_write_line("(file truncated)");
-        let _ = out.try_write_line("");
+        out.try_write(FILE_TRUNCATED_MARKER)?;
     }
 
     Ok(())
