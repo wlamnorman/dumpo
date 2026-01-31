@@ -551,4 +551,17 @@ mod tests {
         assert_eq!(got1, expected);
         assert_eq!(got2, expected);
     }
+
+    #[test]
+    fn should_skip_file_excludes_default_meta_files() {
+        let repo = TempRepo::new();
+
+        repo.write("LICENSE", "mit");
+        repo.write("Makefile", "all:\n\techo hi\n");
+
+        assert!(should_skip_file(&repo.path().join("LICENSE"), true));
+        assert!(should_skip_file(&repo.path().join("Makefile"), true));
+        assert!(should_skip_file(&repo.path().join("LICENSE"), false));
+        assert!(should_skip_file(&repo.path().join("Makefile"), false));
+    }
 }
