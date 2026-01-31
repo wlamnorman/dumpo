@@ -1,6 +1,0 @@
-max_file_bytes = 20000
-max_total_bytes = 400000
-include_hidden = false
-
-include = []
-exclude = []
