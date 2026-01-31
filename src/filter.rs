@@ -2,7 +2,8 @@ use std::path::Path;
 use walkdir::DirEntry;
 
 pub(crate) const PRUNED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
-pub(crate) const EXCLUDED_FILENAMES: [&str; 3] = ["LICENSE", "Makefile", "Cargo.lock"];
+pub(crate) const EXCLUDED_FILENAMES: [&str; 4] =
+    ["LICENSE", "Makefile", "Cargo.lock", "dumpo.toml"];
 
 pub(crate) const SECRET_FILENAMES: [&str; 1] = [".env"];
 pub(crate) const SECRET_PREFIXES: [&str; 1] = [".env."];

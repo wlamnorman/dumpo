@@ -36,6 +36,10 @@ pub(crate) struct PackArgs {
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub(crate) include_hidden: Option<bool>,
 
+    // When present, sets false. Absence means “use config/default”.
+    #[arg(long = "no-include-hidden", action = clap::ArgAction::SetFalse)]
+    pub(crate) no_include_hidden: Option<bool>,
+
     #[arg(long, action = clap::ArgAction::Append)]
     pub(crate) include: Vec<String>,
 

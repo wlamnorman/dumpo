@@ -39,7 +39,11 @@ pub(crate) fn run_pack(args: PackArgs) -> Result<()> {
         .or(cfg.max_total_bytes)
         .unwrap_or(DEFAULT_MAX_TOTAL_BYTES);
 
-    let include_hidden = args.include_hidden.or(cfg.include_hidden).unwrap_or(false);
+    let include_hidden = args
+        .include_hidden
+        .or(args.no_include_hidden)
+        .or(cfg.include_hidden)
+        .unwrap_or(false);
 
     let include = if !args.include.is_empty() {
         args.include
