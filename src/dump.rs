@@ -17,6 +17,8 @@ pub(crate) fn build_dump_bytes(
     let mut out = Out::new(budget);
     out.push_line(fmt::DUMP_TITLE).map_err(to_anyhow)?;
     out.push_line(&fmt::root_line(root)).map_err(to_anyhow)?;
+    out.push_line("")
+        .map_err(|_| anyhow::anyhow!("max_total_bytes reached"))?;
 
     let mut hit_total_limit = false;
     for (rel, path) in collect_files_sorted(root, include_hidden) {
@@ -94,6 +96,7 @@ fn print_file(
     max_file_bytes: usize,
 ) -> std::result::Result<(), PrintError> {
     out.push_line(&fmt::file_heading(rel))?;
+    out.push_line("")?;
     out.push_line(&fmt::code_fence_open(path))?;
 
     let remaining = out.remaining();
