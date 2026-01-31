@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use walkdir::{DirEntry, WalkDir};
 
 const PRUNED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
-const EXCLUDED_FILENAMES: [&str; 4] = ["Makefile", "Cargo.lock", "dump.md", "dumpo.md"];
+const EXCLUDED_FILENAMES: [&str; 5] = ["LICENSE", "Makefile", "Cargo.lock", "dump.md", "dumpo.md"];
 
 const SECRET_FILENAMES: [&str; 1] = [".env"];
 const SECRET_PREFIXES: [&str; 1] = [".env."];
@@ -141,7 +141,39 @@ fn build_dump_bytes(
     out.write_line(&format!("- root: {}", root.display()))?;
     out.write_line("")?;
 
+    let files = collect_files_sorted(root, include_hidden);
+
     let mut hit_total_limit = false;
+
+    for (rel, path) in files {
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        if looks_binary(&bytes) {
+            continue;
+        }
+
+        match print_file(&mut out, &rel, &path, &bytes, max_file_bytes) {
+            Ok(()) => {}
+            Err(PrintError::TotalLimitReached) => {
+                hit_total_limit = true;
+                break;
+            }
+        }
+    }
+
+    if hit_total_limit {
+        let _ = out.try_write_line("");
+        let _ = out.try_write_line("... (truncated: max_total_bytes reached)");
+    }
+
+    Ok(out.into_inner())
+}
+
+fn collect_files_sorted(root: &Path, include_hidden: bool) -> Vec<(PathBuf, PathBuf)> {
+    let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
 
     for entry in WalkDir::new(root)
         .follow_links(false)
@@ -157,38 +189,18 @@ fn build_dump_bytes(
             continue;
         }
 
-        let path = entry.path();
+        let path = entry.into_path();
 
-        if should_skip_file(path, include_hidden) {
+        if should_skip_file(&path, include_hidden) {
             continue;
         }
 
-        let rel = path.strip_prefix(root).unwrap_or(path);
-
-        let bytes = match fs::read(path) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-
-        if looks_binary(&bytes) {
-            continue;
-        }
-
-        match print_file(&mut out, rel, path, &bytes, max_file_bytes) {
-            Ok(()) => {}
-            Err(PrintError::TotalLimitReached) => {
-                hit_total_limit = true;
-                break;
-            }
-        }
+        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        files.push((rel, path));
     }
 
-    if hit_total_limit {
-        let _ = out.try_write_line("");
-        let _ = out.try_write_line("... (truncated: max_total_bytes reached)");
-    }
-
-    Ok(out.into_inner())
+    files.sort_by(|(a_rel, _), (b_rel, _)| a_rel.as_os_str().cmp(b_rel.as_os_str()));
+    files
 }
 
 fn should_prune_walk_entry(e: &DirEntry, include_hidden: bool) -> bool {
@@ -357,5 +369,79 @@ impl<W: Write> Out<W> {
         self.try_write_line(s)
             .map_err(|_| anyhow::anyhow!("max_total_bytes reached"))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempRepo {
+        root: PathBuf,
+    }
+
+    impl TempRepo {
+        fn new() -> Self {
+            let mut root = std::env::temp_dir();
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            root.push(format!("dumpo-test-{}", nanos));
+            fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        fn path(&self) -> &Path {
+            &self.root
+        }
+
+        fn write(&self, rel: &str, contents: &str) {
+            let p = self.root.join(rel);
+            if let Some(parent) = p.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(p, contents).unwrap();
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn collect_files_sorted_is_deterministic_and_lexicographic() {
+        let repo = TempRepo::new();
+
+        // Create in intentionally “unsorted” order.
+        repo.write("z.rs", "z");
+        repo.write("a.rs", "a");
+        repo.write("dir/c.rs", "c");
+        repo.write("dir/b.rs", "b");
+
+        let got1: Vec<PathBuf> = collect_files_sorted(repo.path(), true)
+            .into_iter()
+            .map(|(rel, _)| rel)
+            .collect();
+
+        let got2: Vec<PathBuf> = collect_files_sorted(repo.path(), true)
+            .into_iter()
+            .map(|(rel, _)| rel)
+            .collect();
+
+        let expected = vec![
+            PathBuf::from("a.rs"),
+            PathBuf::from("dir/b.rs"),
+            PathBuf::from("dir/c.rs"),
+            PathBuf::from("z.rs"),
+        ];
+
+        assert_eq!(got1, expected);
+        assert_eq!(got2, expected);
     }
 }
