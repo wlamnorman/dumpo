@@ -172,7 +172,7 @@ impl<W: Write> Out<W> {
         }
         self.w
             .write_all(s.as_bytes())
-            .map_err(|_| PrintError::TotalLimitReached)?;
+            .expect("writing to Out sink failed");
         self.written += n;
         Ok(())
     }
@@ -293,5 +293,18 @@ mod tests {
     fn looks_binary_detects_nul_byte() {
         assert!(super::looks_binary(b"abc\0def"));
         assert!(!super::looks_binary(b"abcdef"));
+    }
+
+    #[test]
+    fn build_dump_bytes_never_exceeds_max_total_bytes() {
+        let repo = TempRepo::new();
+
+        repo.write("a.rs", &"a".repeat(50_000));
+        repo.write("b.rs", &"b".repeat(50_000));
+
+        let max_total = 1_200;
+        let out = build_dump_bytes(repo.path(), 50_000, max_total, true).unwrap();
+
+        assert!(out.len() <= max_total);
     }
 }
