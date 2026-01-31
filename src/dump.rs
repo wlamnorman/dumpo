@@ -297,4 +297,20 @@ mod tests {
 
         assert!(out.len() <= max_total);
     }
+
+    #[test]
+    fn build_dump_bytes_truncation_footer_is_appended_and_within_budget() {
+        let repo = TempRepo::new();
+
+        // One huge file is enough to force total truncation when max_total is small.
+        repo.write("a.rs", &"a".repeat(50_000));
+
+        let max_total = 500;
+        let out = build_dump_bytes(repo.path(), 50_000, max_total, true).unwrap();
+
+        assert!(out.len() <= max_total);
+
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains(crate::format::TRUNCATION_FOOTER.trim_end()));
+    }
 }
