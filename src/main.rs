@@ -381,7 +381,10 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     struct TempRepo {
         root: PathBuf,
@@ -390,11 +393,17 @@ mod tests {
     impl TempRepo {
         fn new() -> Self {
             let mut root = std::env::temp_dir();
+
             let nanos = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            root.push(format!("dumpo-test-{}", nanos));
+
+            let pid = std::process::id();
+            let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+            root.push(format!("dumpo-test-{}-{}-{}", pid, nanos, n));
+
             fs::create_dir_all(&root).unwrap();
             Self { root }
         }
