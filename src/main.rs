@@ -3,6 +3,7 @@ use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 mod clipboard;
+mod config;
 mod dump;
 mod filter;
 mod format;
@@ -24,26 +25,30 @@ pub(crate) struct PackArgs {
     #[arg(default_value = ".")]
     pub(crate) path: PathBuf,
 
-    #[arg(long, default_value_t = 20_000)]
-    pub(crate) max_file_bytes: usize,
+    // Let config/defaults decide if user didn't pass it
+    #[arg(long)]
+    pub(crate) max_file_bytes: Option<usize>,
 
-    #[arg(long, default_value_t = 400_000)]
-    pub(crate) max_total_bytes: usize,
+    #[arg(long)]
+    pub(crate) max_total_bytes: Option<usize>,
 
-    #[arg(long, default_value_t = false)]
-    pub(crate) include_hidden: bool,
+    // When present, sets true. Absence means “use config/default”.
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub(crate) include_hidden: Option<bool>,
 
-    // Repeatable glob patterns matched against repo-relative paths.
-    // Paths are matched with '/' separators (Windows paths are normalized).
-    // Example: --include 'src/**' --include 'Cargo.toml'
     #[arg(long, action = clap::ArgAction::Append)]
     pub(crate) include: Vec<String>,
 
-    // Repeatable glob patterns matched against repo-relative paths.
-    // Paths are matched with '/' separators (Windows paths are normalized).
-    // Example: --exclude 'target/**' --exclude '**/*.min.js'
     #[arg(long, action = clap::ArgAction::Append)]
     pub(crate) exclude: Vec<String>,
+
+    // Optional explicit config path; if not set, search ancestors.
+    #[arg(long)]
+    pub(crate) config: Option<PathBuf>,
+
+    // Disable config loading entirely.
+    #[arg(long, default_value_t = false)]
+    pub(crate) no_config: bool,
 
     #[arg(long, default_value_t = !cfg!(target_os = "macos"))]
     pub(crate) stdout: bool,
