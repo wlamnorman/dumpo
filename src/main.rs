@@ -32,9 +32,6 @@ pub(crate) struct PackArgs {
     pub(crate) include_hidden: bool,
 
     #[arg(long, default_value_t = false)]
-    pub(crate) debug: bool,
-
-    #[arg(long, default_value_t = false)]
     pub(crate) stdout: bool,
 }
 

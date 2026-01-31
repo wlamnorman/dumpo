@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use std::fs;
 use std::io::{self, Write};
 
 use crate::clipboard::copy_to_clipboard;
@@ -20,12 +19,6 @@ pub(crate) fn run_pack(args: PackArgs) -> Result<()> {
     )?;
 
     copy_to_clipboard(&bytes)?;
-
-    if args.debug {
-        let debug_path = root.join(".dumpo.debug.md");
-        fs::write(&debug_path, &bytes)
-            .with_context(|| format!("failed to write {}", debug_path.display()))?;
-    }
 
     if args.stdout {
         let mut out = io::stdout().lock();

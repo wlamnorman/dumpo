@@ -2,8 +2,7 @@ use std::path::Path;
 use walkdir::DirEntry;
 
 pub(crate) const PRUNED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
-pub(crate) const EXCLUDED_FILENAMES: [&str; 4] =
-    ["LICENSE", "Makefile", "Cargo.lock", ".dumpo.debug.md"];
+pub(crate) const EXCLUDED_FILENAMES: [&str; 3] = ["LICENSE", "Makefile", "Cargo.lock"];
 
 pub(crate) const SECRET_FILENAMES: [&str; 1] = [".env"];
 pub(crate) const SECRET_PREFIXES: [&str; 1] = [".env."];
@@ -129,17 +128,5 @@ mod tests {
         assert!(should_skip_file(&repo.path().join("Makefile"), true));
         assert!(should_skip_file(&repo.path().join("LICENSE"), false));
         assert!(should_skip_file(&repo.path().join("Makefile"), false));
-    }
-
-    #[test]
-    fn should_skip_file_excludes_debug_output_file() {
-        let repo = TempRepo::new();
-        repo.write(".dumpo.debug.md", "debug");
-
-        assert!(should_skip_file(&repo.path().join(".dumpo.debug.md"), true));
-        assert!(should_skip_file(
-            &repo.path().join(".dumpo.debug.md"),
-            false
-        ));
     }
 }
