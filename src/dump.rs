@@ -15,10 +15,9 @@ pub(crate) fn build_dump_bytes(
     let budget = max_total_bytes.saturating_sub(fmt::TRUNCATION_FOOTER.len());
 
     let mut out = Out::new(budget);
-    out.push_line(fmt::DUMP_TITLE).map_err(to_anyhow)?;
-    out.push_line(&fmt::root_line(root)).map_err(to_anyhow)?;
-    out.push_line("")
-        .map_err(|_| anyhow::anyhow!("max_total_bytes reached"))?;
+    out.push_line(fmt::DUMP_TITLE)?;
+    out.push_line(&fmt::root_line(root))?;
+    out.push_line("")?;
 
     let mut hit_total_limit = false;
     for (rel, path) in collect_files_sorted(root, include_hidden) {
@@ -88,6 +87,16 @@ enum PrintError {
     TotalLimitReached,
 }
 
+impl std::fmt::Display for PrintError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PrintError::TotalLimitReached => write!(f, "max_total_bytes reached"),
+        }
+    }
+}
+
+impl std::error::Error for PrintError {}
+
 fn print_file(
     out: &mut Out,
     rel: &Path,
@@ -135,10 +144,6 @@ fn print_file(
     }
 
     Ok(())
-}
-
-fn to_anyhow(_: PrintError) -> anyhow::Error {
-    anyhow::anyhow!("max_total_bytes reached")
 }
 
 struct Out {
