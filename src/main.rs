@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 mod clipboard;
@@ -17,47 +17,36 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Args, Debug, Clone)]
+pub(crate) struct PackArgs {
+    #[arg(default_value = ".")]
+    pub(crate) path: PathBuf,
+
+    #[arg(long, default_value_t = 20_000)]
+    pub(crate) max_file_bytes: usize,
+
+    #[arg(long, default_value_t = 400_000)]
+    pub(crate) max_total_bytes: usize,
+
+    #[arg(long, default_value_t = false)]
+    pub(crate) include_hidden: bool,
+
+    #[arg(long, default_value_t = false)]
+    pub(crate) debug: bool,
+
+    #[arg(long, default_value_t = false)]
+    pub(crate) stdout: bool,
+}
+
 #[derive(Subcommand)]
 enum Commands {
-    Pack {
-        #[arg(default_value = ".")]
-        path: PathBuf,
-
-        #[arg(long, default_value_t = 20_000)]
-        max_file_bytes: usize,
-
-        #[arg(long, default_value_t = 400_000)]
-        max_total_bytes: usize,
-
-        #[arg(long, default_value_t = false)]
-        include_hidden: bool,
-
-        #[arg(long, default_value_t = false)]
-        debug: bool,
-
-        #[arg(long, default_value_t = false)]
-        stdout: bool,
-    },
+    Pack(PackArgs),
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Pack {
-            path,
-            max_file_bytes,
-            max_total_bytes,
-            include_hidden,
-            debug,
-            stdout,
-        } => pack::run_pack(
-            &path,
-            max_file_bytes,
-            max_total_bytes,
-            include_hidden,
-            debug,
-            stdout,
-        ),
+        Commands::Pack(args) => pack::run_pack(args),
     }
 }
