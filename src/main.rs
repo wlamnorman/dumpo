@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use walkdir::{DirEntry, WalkDir};
 
 const PRUNED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
-const EXCLUDED_FILENAMES: [&str; 5] = ["LICENSE", "Makefile", "Cargo.lock", "dump.md", "dumpo.md"];
+const EXCLUDED_FILENAMES: [&str; 4] = ["LICENSE", "Makefile", "Cargo.lock", ".dumpo.debug.md"];
 
 const SECRET_FILENAMES: [&str; 1] = [".env"];
 const SECRET_PREFIXES: [&str; 1] = [".env."];
@@ -96,7 +96,7 @@ fn run_pack(
     }
 
     if debug {
-        let debug_path = root.join("dumpo.md");
+        let debug_path = root.join(".dumpo.debug.md");
         fs::write(&debug_path, &bytes)
             .with_context(|| format!("failed to write {}", debug_path.display()))?;
     }
@@ -446,16 +446,12 @@ mod tests {
     }
 
     #[test]
-    fn should_skip_file_excludes_lockfiles_and_self_outputs() {
+    fn should_skip_file_excludes_lockfile() {
         let repo = TempRepo::new();
 
         repo.write("Cargo.lock", "lock");
-        repo.write("dumpo.md", "self");
-        repo.write("dump.md", "self");
 
         assert!(should_skip_file(&repo.path().join("Cargo.lock"), true));
-        assert!(should_skip_file(&repo.path().join("dumpo.md"), true));
-        assert!(should_skip_file(&repo.path().join("dump.md"), true));
     }
 
     #[test]
@@ -598,5 +594,17 @@ mod tests {
         assert!(s2.contains("## .hidden.txt"));
         assert!(s2.contains("secret-ish but not excluded"));
         assert!(s2.contains("```"));
+    }
+
+    #[test]
+    fn should_skip_file_excludes_debug_output_file() {
+        let repo = TempRepo::new();
+
+        repo.write(".dumpo.debug.md", "debug");
+        assert!(should_skip_file(&repo.path().join(".dumpo.debug.md"), true));
+        assert!(should_skip_file(
+            &repo.path().join(".dumpo.debug.md"),
+            false
+        ));
     }
 }
