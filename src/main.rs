@@ -419,6 +419,109 @@ mod tests {
     }
 
     #[test]
+    fn should_skip_file_excludes_secrets_even_when_hidden_included() {
+        let repo = TempRepo::new();
+
+        repo.write(".env", "SECRET=1");
+        repo.write(".env.local", "SECRET=2");
+
+        let env = repo.path().join(".env");
+        let env_local = repo.path().join(".env.local");
+
+        assert!(should_skip_file(&env, true));
+        assert!(should_skip_file(&env_local, true));
+        assert!(should_skip_file(&env, false));
+        assert!(should_skip_file(&env_local, false));
+    }
+
+    #[test]
+    fn should_skip_file_respects_include_hidden_flag_for_non_secrets() {
+        let repo = TempRepo::new();
+
+        repo.write(".hidden.txt", "ok");
+        let hidden = repo.path().join(".hidden.txt");
+
+        assert!(should_skip_file(&hidden, false));
+        assert!(!should_skip_file(&hidden, true));
+    }
+
+    #[test]
+    fn should_skip_file_excludes_lockfiles_and_self_outputs() {
+        let repo = TempRepo::new();
+
+        repo.write("Cargo.lock", "lock");
+        repo.write("dumpo.md", "self");
+        repo.write("dump.md", "self");
+
+        assert!(should_skip_file(&repo.path().join("Cargo.lock"), true));
+        assert!(should_skip_file(&repo.path().join("dumpo.md"), true));
+        assert!(should_skip_file(&repo.path().join("dump.md"), true));
+    }
+
+    #[test]
+    fn should_skip_file_excludes_binaryish_extensions_case_insensitive() {
+        let repo = TempRepo::new();
+
+        repo.write("a.PNG", "not actually png but extension should exclude");
+        repo.write("b.PdF", "not actually pdf but extension should exclude");
+
+        assert!(should_skip_file(&repo.path().join("a.PNG"), true));
+        assert!(should_skip_file(&repo.path().join("b.PdF"), true));
+    }
+
+    #[test]
+    fn collect_files_sorted_skips_pruned_dirs() {
+        let repo = TempRepo::new();
+
+        repo.write("target/keep.rs", "nope");
+        repo.write(".git/config", "nope");
+        repo.write("node_modules/x.js", "nope");
+        repo.write("src/lib.rs", "yes");
+
+        let got: Vec<PathBuf> = collect_files_sorted(repo.path(), true)
+            .into_iter()
+            .map(|(rel, _)| rel)
+            .collect();
+
+        assert_eq!(got, vec![PathBuf::from("src/lib.rs")]);
+    }
+
+    #[test]
+    fn build_dump_bytes_enforces_max_file_bytes_truncation() {
+        let repo = TempRepo::new();
+
+        let long = "a".repeat(1_000);
+        repo.write("src/lib.rs", &long);
+
+        let out = build_dump_bytes(repo.path(), 50, 10_000, true).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("## src/lib.rs"));
+        assert!(s.contains("(file truncated)"));
+        assert!(!s.contains(&long));
+    }
+
+    #[test]
+    fn build_dump_bytes_enforces_max_total_bytes_truncation_marker() {
+        let repo = TempRepo::new();
+
+        repo.write("a.rs", &"a".repeat(2_000));
+        repo.write("b.rs", &"b".repeat(2_000));
+        repo.write("c.rs", &"c".repeat(2_000));
+
+        let out = build_dump_bytes(repo.path(), 2_000, 1_200, true).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("... (truncated: max_total_bytes reached)"));
+    }
+
+    #[test]
+    fn looks_binary_detects_nul_byte() {
+        assert!(looks_binary(b"abc\0def"));
+        assert!(!looks_binary(b"abcdef"));
+    }
+
+    #[test]
     fn collect_files_sorted_is_deterministic_and_lexicographic() {
         let repo = TempRepo::new();
 
