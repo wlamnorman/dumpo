@@ -5,6 +5,7 @@ use std::path::PathBuf;
 mod clipboard;
 mod dump;
 mod filter;
+mod format;
 mod pack;
 
 #[cfg(test)]

@@ -1,14 +1,9 @@
+use crate::filter::{should_prune_walk_entry, should_skip_file};
+use crate::format as fmt;
 use anyhow::Result;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-
-use crate::filter::{should_prune_walk_entry, should_skip_file};
-
-const CODEBLOCK_CLOSE: &str = "```\n\n";
-const TRUNCATION_FOOTER: &str = "\n... (truncated: max_total_bytes reached)\n";
-const FILE_TRUNCATED_MARKER: &str = "(file truncated)\n\n";
 
 pub(crate) fn build_dump_bytes(
     root: &Path,
@@ -16,20 +11,15 @@ pub(crate) fn build_dump_bytes(
     max_total_bytes: usize,
     include_hidden: bool,
 ) -> Result<Vec<u8>> {
-    let reserved = TRUNCATION_FOOTER.len();
-    let budget = max_total_bytes.saturating_sub(reserved);
+    // Reserve space for the footer so that, if we hit the budget, we can always append it.
+    let budget = max_total_bytes.saturating_sub(fmt::TRUNCATION_FOOTER.len());
 
-    let mut out = Out::new(Vec::<u8>::new(), budget);
-
-    out.write_line("# dumpo pack")?;
-    out.write_line(&format!("- root: {}", root.display()))?;
-    out.write_line("")?;
-
-    let files = collect_files_sorted(root, include_hidden);
+    let mut out = Out::new(budget);
+    out.push_line(fmt::DUMP_TITLE).map_err(to_anyhow)?;
+    out.push_line(&fmt::root_line(root)).map_err(to_anyhow)?;
 
     let mut hit_total_limit = false;
-
-    for (rel, path) in files {
+    for (rel, path) in collect_files_sorted(root, include_hidden) {
         let bytes = match fs::read(&path) {
             Ok(b) => b,
             Err(_) => continue,
@@ -50,7 +40,7 @@ pub(crate) fn build_dump_bytes(
 
     let mut buf = out.into_inner();
     if hit_total_limit {
-        buf.extend_from_slice(TRUNCATION_FOOTER.as_bytes());
+        buf.extend_from_slice(fmt::TRUNCATION_FOOTER.as_bytes());
     }
 
     Ok(buf)
@@ -91,101 +81,98 @@ fn looks_binary(bytes: &[u8]) -> bool {
     bytes.contains(&0)
 }
 
-fn language_hint(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-        "rs" => "rust",
-        "toml" => "toml",
-        "md" => "markdown",
-        "yml" | "yaml" => "yaml",
-        "json" => "json",
-        "py" => "python",
-        "sh" => "bash",
-        _ => "",
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 enum PrintError {
     TotalLimitReached,
 }
 
 fn print_file(
-    out: &mut Out<impl Write>,
+    out: &mut Out,
     rel: &Path,
     path: &Path,
     bytes: &[u8],
     max_file_bytes: usize,
 ) -> std::result::Result<(), PrintError> {
-    out.try_write_line(&format!("## {}", rel.display()))?;
-    out.try_write_line("")?;
-    out.try_write_line(&format!("```{}", language_hint(path)))?;
+    out.push_line(&fmt::file_heading(rel))?;
+    out.push_line(&fmt::code_fence_open(path))?;
 
-    let remaining_for_content = out.remaining().saturating_sub(CODEBLOCK_CLOSE.len());
-    if remaining_for_content == 0 {
+    let remaining = out.remaining();
+    if remaining <= fmt::CODEBLOCK_CLOSE.len() {
         return Err(PrintError::TotalLimitReached);
     }
 
-    let cap = max_file_bytes.min(remaining_for_content);
-    let slice = &bytes[..bytes.len().min(cap)];
+    // Start by reserving only the closing fence. If we end up truncating, we'll
+    // also reserve for the truncation marker by shrinking the cap.
+    let max_content_by_total = remaining - fmt::CODEBLOCK_CLOSE.len();
+    let mut cap = max_file_bytes.min(max_content_by_total).min(bytes.len());
 
-    let text = String::from_utf8_lossy(slice);
-    out.try_write(&text)?;
-
-    if !text.ends_with('\n') {
-        out.try_write_line("")?;
+    // If truncation will occur, ensure we can also fit the truncation marker.
+    if cap < bytes.len() {
+        let needed_after_content = fmt::CODEBLOCK_CLOSE.len() + fmt::FILE_TRUNCATED_MARKER.len();
+        if remaining <= needed_after_content {
+            // Make room for the marker by reducing content further.
+            let max_content_with_marker = remaining.saturating_sub(needed_after_content);
+            if max_content_with_marker == 0 {
+                return Err(PrintError::TotalLimitReached);
+            }
+            cap = cap.min(max_content_with_marker);
+        }
     }
 
-    out.try_write(CODEBLOCK_CLOSE)?;
-    if bytes.len() > cap {
-        out.try_write(FILE_TRUNCATED_MARKER)?;
+    let text = String::from_utf8_lossy(&bytes[..cap]);
+    out.push_str(&text)?;
+
+    if !text.ends_with('\n') {
+        out.push_line("")?;
+    }
+
+    out.push_str(fmt::CODEBLOCK_CLOSE)?;
+    if cap < bytes.len() {
+        out.push_str(fmt::FILE_TRUNCATED_MARKER)?;
     }
 
     Ok(())
 }
 
-struct Out<W: Write> {
-    w: W,
-    written: usize,
+fn to_anyhow(_: PrintError) -> anyhow::Error {
+    anyhow::anyhow!("max_total_bytes reached")
+}
+
+struct Out {
+    buf: Vec<u8>,
     max: usize,
 }
 
-impl<W: Write> Out<W> {
-    fn new(w: W, max: usize) -> Self {
-        Self { w, written: 0, max }
+impl Out {
+    fn new(max: usize) -> Self {
+        Self {
+            buf: Vec::new(),
+            max,
+        }
     }
 
-    fn into_inner(self) -> W {
-        self.w
+    fn into_inner(self) -> Vec<u8> {
+        self.buf
     }
 
     fn remaining(&self) -> usize {
-        self.max.saturating_sub(self.written)
+        self.max.saturating_sub(self.buf.len())
     }
 
-    fn try_write(&mut self, s: &str) -> std::result::Result<(), PrintError> {
+    fn push_str(&mut self, s: &str) -> std::result::Result<(), PrintError> {
         if s.is_empty() {
             return Ok(());
         }
-        let n = s.len();
-        if self.written.saturating_add(n) > self.max {
+        if self.buf.len().saturating_add(s.len()) > self.max {
             return Err(PrintError::TotalLimitReached);
         }
-        self.w
-            .write_all(s.as_bytes())
-            .expect("writing to Out sink failed");
-        self.written += n;
+        self.buf.extend_from_slice(s.as_bytes());
         Ok(())
     }
 
-    fn try_write_line(&mut self, s: &str) -> std::result::Result<(), PrintError> {
-        self.try_write(s)?;
-        self.try_write("\n")?;
-        Ok(())
-    }
-
-    fn write_line(&mut self, s: &str) -> Result<()> {
-        self.try_write_line(s)
-            .map_err(|_| anyhow::anyhow!("max_total_bytes reached"))?;
+    fn push_line(&mut self, s: &str) -> std::result::Result<(), PrintError> {
+        self.push_str(s)?;
+        self.push_str("\n")?;
         Ok(())
     }
 }
