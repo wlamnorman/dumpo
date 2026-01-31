@@ -17,6 +17,7 @@ const EXCLUDED_EXTS: [&str; 24] = [
     "png", "jpg", "jpeg", "gif", "webp", "pdf", "zip", "gz", "bz2", "xz", "7z", "woff", "woff2",
     "ttf", "otf", "mp4", "mov", "mp3", "wav", "bin", "exe", "dll", "so", "dylib",
 ];
+const TRUNCATION_FOOTER: &str = "\n... (truncated: max_total_bytes reached)\n";
 
 #[derive(Parser)]
 #[command(name = "dumpo", about = "Dump a repo into a paste-ready LLM prompt")]
@@ -135,7 +136,10 @@ fn build_dump_bytes(
     max_total_bytes: usize,
     include_hidden: bool,
 ) -> Result<Vec<u8>> {
-    let mut out = Out::new(Vec::<u8>::new(), max_total_bytes);
+    let reserved = TRUNCATION_FOOTER.len();
+    let budget = max_total_bytes.saturating_sub(reserved);
+
+    let mut out = Out::new(Vec::<u8>::new(), budget);
 
     out.write_line("# dumpo pack")?;
     out.write_line(&format!("- root: {}", root.display()))?;
@@ -164,12 +168,12 @@ fn build_dump_bytes(
         }
     }
 
+    let mut buf = out.into_inner();
     if hit_total_limit {
-        let _ = out.try_write_line("");
-        let _ = out.try_write_line("... (truncated: max_total_bytes reached)");
+        buf.extend_from_slice(TRUNCATION_FOOTER.as_bytes());
     }
 
-    Ok(out.into_inner())
+    Ok(buf)
 }
 
 fn collect_files_sorted(root: &Path, include_hidden: bool) -> Vec<(PathBuf, PathBuf)> {
