@@ -7,6 +7,7 @@ mod dump;
 mod filter;
 mod format;
 mod pack;
+mod selector;
 
 #[cfg(test)]
 mod testutil;
@@ -31,6 +32,18 @@ pub(crate) struct PackArgs {
 
     #[arg(long, default_value_t = false)]
     pub(crate) include_hidden: bool,
+
+    // Repeatable glob patterns matched against repo-relative paths.
+    // Paths are matched with '/' separators (Windows paths are normalized).
+    // Example: --include 'src/**' --include 'Cargo.toml'
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub(crate) include: Vec<String>,
+
+    // Repeatable glob patterns matched against repo-relative paths.
+    // Paths are matched with '/' separators (Windows paths are normalized).
+    // Example: --exclude 'target/**' --exclude '**/*.min.js'
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub(crate) exclude: Vec<String>,
 
     #[arg(long, default_value_t = !cfg!(target_os = "macos"))]
     pub(crate) stdout: bool,

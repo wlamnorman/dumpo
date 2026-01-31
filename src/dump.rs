@@ -1,5 +1,6 @@
 use crate::filter::{should_prune_walk_entry, should_skip_file};
 use crate::format as fmt;
+use crate::selector::Selector;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,7 @@ pub(crate) fn build_dump_bytes(
     max_file_bytes: usize,
     max_total_bytes: usize,
     include_hidden: bool,
+    selector: &Selector,
 ) -> Result<Vec<u8>> {
     // Reserve space for the footer so that, if we hit the budget, we can always append it.
     let budget = max_total_bytes.saturating_sub(fmt::TRUNCATION_FOOTER.len());
@@ -20,7 +22,7 @@ pub(crate) fn build_dump_bytes(
     out.push_line("")?;
 
     let mut hit_total_limit = false;
-    for (rel, path) in collect_files_sorted(root, include_hidden) {
+    for (rel, path) in collect_files_sorted(root, include_hidden, selector) {
         let bytes = match fs::read(&path) {
             Ok(b) => b,
             Err(_) => continue,
@@ -47,8 +49,12 @@ pub(crate) fn build_dump_bytes(
     Ok(buf)
 }
 
-pub(crate) fn collect_files_sorted(root: &Path, include_hidden: bool) -> Vec<(PathBuf, PathBuf)> {
-    let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
+pub(crate) fn collect_files_sorted(
+    root: &Path,
+    include_hidden: bool,
+    selector: &Selector,
+) -> Vec<(PathBuf, PathBuf)> {
+    let mut files = Vec::new();
 
     for entry in WalkDir::new(root)
         .follow_links(false)
@@ -71,6 +77,12 @@ pub(crate) fn collect_files_sorted(root: &Path, include_hidden: bool) -> Vec<(Pa
         }
 
         let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+
+        let rel_slash = rel.to_string_lossy().replace('\\', "/");
+        if !selector.matches(&rel_slash) {
+            continue;
+        }
+
         files.push((rel, path));
     }
 
@@ -200,6 +212,16 @@ mod tests {
     use super::*;
     use crate::testutil::TempRepo;
 
+    fn sel_all() -> crate::selector::Selector {
+        crate::selector::Selector::new(&[], &[]).unwrap()
+    }
+
+    fn sel(includes: &[&str], excludes: &[&str]) -> crate::selector::Selector {
+        let inc: Vec<String> = includes.iter().map(|s| s.to_string()).collect();
+        let exc: Vec<String> = excludes.iter().map(|s| s.to_string()).collect();
+        crate::selector::Selector::new(&inc, &exc).unwrap()
+    }
+
     #[test]
     fn collect_files_sorted_is_deterministic_and_lexicographic() {
         let repo = TempRepo::new();
@@ -209,12 +231,14 @@ mod tests {
         repo.write("dir/c.rs", "c");
         repo.write("dir/b.rs", "b");
 
-        let got1: Vec<PathBuf> = collect_files_sorted(repo.path(), true)
+        let selector = sel_all();
+
+        let got1: Vec<PathBuf> = collect_files_sorted(repo.path(), true, &selector)
             .into_iter()
             .map(|(rel, _)| rel)
             .collect();
 
-        let got2: Vec<PathBuf> = collect_files_sorted(repo.path(), true)
+        let got2: Vec<PathBuf> = collect_files_sorted(repo.path(), true, &selector)
             .into_iter()
             .map(|(rel, _)| rel)
             .collect();
@@ -237,7 +261,8 @@ mod tests {
         let long = "a".repeat(1_000);
         repo.write("src/lib.rs", &long);
 
-        let out = build_dump_bytes(repo.path(), 50, 10_000, true).unwrap();
+        let selector = sel_all();
+        let out = build_dump_bytes(repo.path(), 50, 10_000, true, &selector).unwrap();
         let s = String::from_utf8(out).unwrap();
 
         assert!(s.contains("## src/lib.rs"));
@@ -253,10 +278,11 @@ mod tests {
         repo.write("b.rs", &"b".repeat(2_000));
         repo.write("c.rs", &"c".repeat(2_000));
 
-        let out = build_dump_bytes(repo.path(), 2_000, 1_200, true).unwrap();
+        let selector = sel_all();
+        let out = build_dump_bytes(repo.path(), 2_000, 1_200, true, &selector).unwrap();
         let s = String::from_utf8(out).unwrap();
 
-        assert!(s.contains("... (truncated: max_total_bytes reached)"));
+        assert!(s.contains(crate::format::TRUNCATION_FOOTER.trim_end()));
     }
 
     #[test]
@@ -268,7 +294,10 @@ mod tests {
         repo.write("dir/b.rs", "fn b() {}\n");
         repo.write(".hidden.txt", "secret-ish but not excluded\n");
 
-        let out_no_hidden = build_dump_bytes(repo.path(), 10_000, 200_000, false).unwrap();
+        let selector = sel_all();
+
+        let out_no_hidden =
+            build_dump_bytes(repo.path(), 10_000, 200_000, false, &selector).unwrap();
         let s1 = String::from_utf8(out_no_hidden).unwrap();
 
         let a_idx = s1.find("## a.rs").unwrap();
@@ -286,7 +315,8 @@ mod tests {
         assert!(!s1.contains("## .hidden.txt"));
         assert!(!s1.contains("secret-ish but not excluded"));
 
-        let out_with_hidden = build_dump_bytes(repo.path(), 10_000, 200_000, true).unwrap();
+        let out_with_hidden =
+            build_dump_bytes(repo.path(), 10_000, 200_000, true, &selector).unwrap();
         let s2 = String::from_utf8(out_with_hidden).unwrap();
 
         assert!(s2.contains("## .hidden.txt"));
@@ -307,8 +337,9 @@ mod tests {
         repo.write("a.rs", &"a".repeat(50_000));
         repo.write("b.rs", &"b".repeat(50_000));
 
+        let selector = sel_all();
         let max_total = 1_200;
-        let out = build_dump_bytes(repo.path(), 50_000, max_total, true).unwrap();
+        let out = build_dump_bytes(repo.path(), 50_000, max_total, true, &selector).unwrap();
 
         assert!(out.len() <= max_total);
     }
@@ -320,12 +351,73 @@ mod tests {
         // One huge file is enough to force total truncation when max_total is small.
         repo.write("a.rs", &"a".repeat(50_000));
 
+        let selector = sel_all();
         let max_total = 500;
-        let out = build_dump_bytes(repo.path(), 50_000, max_total, true).unwrap();
+        let out = build_dump_bytes(repo.path(), 50_000, max_total, true, &selector).unwrap();
 
         assert!(out.len() <= max_total);
 
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains(crate::format::TRUNCATION_FOOTER.trim_end()));
+    }
+
+    #[test]
+    fn build_dump_bytes_respects_include_globs() {
+        let repo = TempRepo::new();
+        repo.write("src/lib.rs", "x\n");
+        repo.write("README.md", "y\n");
+
+        let sel = crate::selector::Selector::new(&["src/**".to_string()], &[]).unwrap();
+
+        let out = build_dump_bytes(repo.path(), 10_000, 200_000, true, &sel).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("## src/lib.rs"));
+        assert!(!s.contains("## README.md"));
+    }
+
+    #[test]
+    fn build_dump_bytes_exclude_overrides_include() {
+        let repo = TempRepo::new();
+        repo.write("src/lib.rs", "x\n");
+        repo.write("src/secret.rs", "y\n");
+
+        let sel =
+            crate::selector::Selector::new(&["src/**".to_string()], &["**/secret.rs".to_string()])
+                .unwrap();
+
+        let out = build_dump_bytes(repo.path(), 10_000, 200_000, true, &sel).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("## src/lib.rs"));
+        assert!(!s.contains("## src/secret.rs"));
+    }
+
+    #[test]
+    fn selector_cannot_include_secrets() {
+        let repo = TempRepo::new();
+        repo.write(".env", "SECRET=1\n");
+
+        let selector = sel(&[".env"], &[]);
+        let out = build_dump_bytes(repo.path(), 10_000, 200_000, true, &selector).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(!s.contains("## .env"));
+        assert!(!s.contains("SECRET=1"));
+    }
+
+    #[test]
+    fn build_dump_bytes_respects_exclude_globs_without_includes() {
+        let repo = TempRepo::new();
+        repo.write("src/lib.rs", "x\n");
+        repo.write("README.md", "y\n");
+
+        let sel = crate::selector::Selector::new(&[], &["README.md".to_string()]).unwrap();
+
+        let out = build_dump_bytes(repo.path(), 10_000, 200_000, true, &sel).unwrap();
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains("## src/lib.rs"));
+        assert!(!s.contains("## README.md"));
     }
 }
