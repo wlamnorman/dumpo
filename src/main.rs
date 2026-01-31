@@ -564,4 +564,39 @@ mod tests {
         assert!(should_skip_file(&repo.path().join("LICENSE"), false));
         assert!(should_skip_file(&repo.path().join("Makefile"), false));
     }
+
+    #[test]
+    fn build_dump_bytes_is_ordered_and_respects_hidden_flag_end_to_end() {
+        let repo = TempRepo::new();
+
+        repo.write("z.rs", "fn z() {}\n");
+        repo.write("a.rs", "fn a() {}\n");
+        repo.write("dir/b.rs", "fn b() {}\n");
+        repo.write(".hidden.txt", "secret-ish but not excluded\n");
+
+        let out_no_hidden = build_dump_bytes(repo.path(), 10_000, 200_000, false).unwrap();
+        let s1 = String::from_utf8(out_no_hidden).unwrap();
+
+        let a_idx = s1.find("## a.rs").unwrap();
+        let b_idx = s1.find("## dir/b.rs").unwrap();
+        let z_idx = s1.find("## z.rs").unwrap();
+
+        assert!(a_idx < b_idx);
+        assert!(b_idx < z_idx);
+
+        assert!(s1.contains("```rust"));
+        assert!(s1.contains("fn a() {}"));
+        assert!(s1.contains("fn b() {}"));
+        assert!(s1.contains("fn z() {}"));
+
+        assert!(!s1.contains("## .hidden.txt"));
+        assert!(!s1.contains("secret-ish but not excluded"));
+
+        let out_with_hidden = build_dump_bytes(repo.path(), 10_000, 200_000, true).unwrap();
+        let s2 = String::from_utf8(out_with_hidden).unwrap();
+
+        assert!(s2.contains("## .hidden.txt"));
+        assert!(s2.contains("secret-ish but not excluded"));
+        assert!(s2.contains("```"));
+    }
 }
